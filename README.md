@@ -11,6 +11,7 @@ A static, browser-only time-zone planner that can be hosted on GitHub Pages.
 - Lets users select their own place/time zone and another person's place/time zone.
 - Saves contacts, notes, and profile choices in `localStorage`.
 - Optional "Check on Them" safety summaries through a separate backend endpoint.
+- Optional recent safety-related article search for the past week.
 - Includes playful contact cards, profile choices, button sounds, and animations.
 - Works when opened directly as `index.html` and when hosted on GitHub Pages.
 
@@ -20,6 +21,7 @@ A static, browser-only time-zone planner that can be hosted on GitHub Pages.
 - `style.css` - responsive visual design and animations.
 - `script.js` - browser-only application logic.
 - `api/check-on-them.js` - optional Vercel Function for safety checks.
+- `api/safety-articles.js` - optional Vercel Function for recent safety-related article links.
 - `vercel.json` - optional Vercel Function settings.
 
 The old Python files can be kept as historical reference, but they are not required for the static app.
@@ -65,9 +67,13 @@ The function currently uses public APIs that do not require API keys:
 
 - Open-Meteo geocoding and forecast data
 - National Weather Service alerts for US locations
-- GDELT article search for recent local updates
+- Google News RSS search for the separate recent-articles endpoint
 
-It does not use AI and does not invent information. If reliable results are unavailable, that category is returned empty and the frontend says no reliable results were found.
+The fast safety function does not fetch news articles directly. Instead, it returns Google News search links for news-like categories so it can stay under the 5-second Vercel timeout.
+
+The separate article endpoint at `api/safety-articles.js` searches Google News RSS for safety-related articles from the past week. It does not require API keys, but RSS search can still be incomplete or unavailable. If no reliable article links are returned, the frontend shows a manual search link.
+
+The backend does not use AI and does not invent information. If reliable results are unavailable, it says so.
 
 ### Deploy Backend To Vercel
 
@@ -82,7 +88,9 @@ It does not use AI and does not invent information. If reliable results are unav
 
 7. Open the app.
 8. Paste that URL into **Check on Them backend URL (optional)**.
-9. Save or change contacts as usual, then click **Check on Them**.
+9. Save or change contacts as usual.
+10. Click **Check on Them** for fast weather/alert checks.
+11. Click **Find Articles** for recent safety-related article links from the past week.
 
 The backend URL is stored only in your browser's `localStorage`.
 
