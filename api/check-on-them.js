@@ -5,9 +5,8 @@ const CORS_HEADERS = {
   "Content-Type": "application/json",
 };
 
-const SAFETY_TERMS = "attack shooting assault wildfire storm flood emergency public safety warning";
-const TRAFFIC_TERMS = "major traffic accident road closure transit disruption crash";
-const FOOD_HEALTH_TERMS = "food safety recall health alert boil water advisory contamination";
+const SAFETY_QUERY =
+  "attack shooting assault wildfire storm flood emergency public safety warning traffic accident road closure food safety recall health alert";
 
 export default async function handler(request, response) {
   if (request.method === "OPTIONS") {
@@ -25,12 +24,12 @@ export default async function handler(request, response) {
     const body = await readJson(request);
     const contact = body.contact || {};
     const location = String(body.location || contact.area || contact.cityRegion || "").trim();
+
     if (!location) {
       sendJson(response, 400, { error: "A contact location is required." });
       return;
     }
 
-    const place = await geocode(location);
     const categories = {
       Weather: [],
       "Safety News": [],
@@ -39,31 +38,45 @@ export default async function handler(request, response) {
       "General Local Updates": [],
     };
 
-    if (place) {
-      categories.Weather.push(...await weatherItems(place));
-      if (place.country === "United States") {
-        categories.Weather.push(...await usWeatherAlerts(place));
-      }
-    } else {
-      categories.Weather.push({
-        title: "Weather unavailable",
-        summary: "Could not find coordinates for this location from the public geocoding source.",
-      });
-    }
+    const place = await geocode(location);
 
-    categories["Safety News"].push(...await gdeltItems(location, SAFETY_TERMS));
-    categories.Traffic.push(...await gdeltItems(location, TRAFFIC_TERMS));
-    categories["Food/Health Alerts"].push(...await gdeltItems(location, FOOD_HEALTH_TERMS));
-    categories["General Local Updates"].push(...await gdeltItems(location, "local emergency alert warning"));
+    const [weather, alerts, news] = await Promise.all([
+      place ? weatherItems(place) : Promise.resolve([{
+        title: "Weather unavailable",
+        summary: "Could not find coordinates for this location.",
+      }]),
+      place && place.country === "United States" ? usWeatherAlerts(place) : Promise.resolve([]),
+      gdeltItems(location, SAFETY_QUERY),
+    ]);
+
+    categories.Weather.push(...weather, ...alerts);
+    categories["Safety News"].push(...news.slice(0, 3));
+    categories.Traffic.push(...news.filter(item =>
+      /traffic|accident|crash|road|closure/i.test(item.title + " " + item.summary)
+    ).slice(0, 3));
+    categories["Food/Health Alerts"].push(...news.filter(item =>
+      /food|recall|health|water|contamination/i.test(item.title + " " + item.summary)
+    ).slice(0, 3));
+    categories["General Local Updates"].push(...news.slice(0, 5));
 
     sendJson(response, 200, {
       location: place?.label || location,
       generatedAt: new Date().toISOString(),
-      note: "This is a public-source summary, not an emergency alert service. No AI-generated claims are added when sources are unavailable.",
+      note: "This is a public-source summary, not an emergency alert service.",
       categories,
     });
   } catch (error) {
-    sendJson(response, 500, { error: error.message || "Safety check failed." });
+    sendJson(response, 200, {
+      error: "Safety check partially failed.",
+      detail: error.message || "Unknown error.",
+      categories: {
+        Weather: [],
+        "Safety News": [],
+        Traffic: [],
+        "Food/Health Alerts": [],
+        "General Local Updates": [],
+      },
+    });
   }
 }
 
@@ -90,27 +103,36 @@ function readJson(request) {
   });
 }
 
-async function fetchJson(url, options = {}) {
+async function fetchJson(url, timeoutMs = 4000) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs || 9000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
-    const response = await fetch(url, {
+    const res = await fetch(url, {
       headers: { "User-Agent": "TimeZonePlannerSafetyCheck/1.0" },
       signal: controller.signal,
     });
-    if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-    return await response.json();
+
+    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+    return await res.json();
   } finally {
     clearTimeout(timer);
   }
 }
 
 async function geocode(location) {
-  const params = new URLSearchParams({ name: location, count: "1", language: "en", format: "json" });
+  const params = new URLSearchParams({
+    name: location,
+    count: "1",
+    language: "en",
+    format: "json",
+  });
+
   try {
-    const data = await fetchJson(`https://geocoding-api.open-meteo.com/v1/search?${params}`);
+    const data = await fetchJson(`https://geocoding-api.open-meteo.com/v1/search?${params}`, 4000);
     const item = data.results?.[0];
     if (!item) return null;
+
     return {
       label: [item.name, item.admin1, item.country].filter(Boolean).join(", "),
       latitude: item.latitude,
@@ -131,29 +153,32 @@ async function weatherItems(place) {
     forecast_days: "1",
     timezone: "auto",
   });
+
   try {
-    const data = await fetchJson(`https://api.open-meteo.com/v1/forecast?${params}`);
+    const data = await fetchJson(`https://api.open-meteo.com/v1/forecast?${params}`, 4000);
     const current = data.current || {};
-    const concerns = [];
-    const wind = Number(current.wind_speed_10m || 0);
-    const gusts = Number(current.wind_gusts_10m || 0);
-    const precipitation = Number(current.precipitation || 0);
-    if (wind >= 50 || gusts >= 70) concerns.push("strong wind");
-    if (precipitation >= 10) concerns.push("heavy precipitation");
+
     return [{
-      title: concerns.length ? `Possible weather concern: ${concerns.join(", ")}` : "No extreme weather signal found in current public forecast data",
+      title: "Current public weather data",
       summary: `Weather code ${current.weather_code ?? "unknown"}; wind ${current.wind_speed_10m ?? "unknown"} km/h; gusts ${current.wind_gusts_10m ?? "unknown"} km/h; precipitation ${current.precipitation ?? "unknown"} mm.`,
-      url: `https://open-meteo.com/`,
+      url: "https://open-meteo.com/",
     }];
   } catch {
-    return [];
+    return [{
+      title: "Weather unavailable",
+      summary: "The public weather source did not respond in time.",
+    }];
   }
 }
 
 async function usWeatherAlerts(place) {
   try {
-    const data = await fetchJson(`https://api.weather.gov/alerts/active?point=${place.latitude},${place.longitude}`);
-    return (data.features || []).slice(0, 5).map(feature => {
+    const data = await fetchJson(
+      `https://api.weather.gov/alerts/active?point=${place.latitude},${place.longitude}`,
+      4000
+    );
+
+    return (data.features || []).slice(0, 3).map(feature => {
       const props = feature.properties || {};
       return {
         title: props.event || "Weather alert",
@@ -172,17 +197,22 @@ async function gdeltItems(location, terms) {
     mode: "ArtList",
     format: "json",
     timespan: "3d",
-    maxrecords: "5",
+    maxrecords: "6",
     sort: "datedesc",
   });
+
   try {
-    const data = await fetchJson(`https://api.gdeltproject.org/api/v2/doc/doc?${params}`);
-    return (data.articles || []).slice(0, 5).map(article => ({
+    const data = await fetchJson(`https://api.gdeltproject.org/api/v2/doc/doc?${params}`, 4000);
+
+    return (data.articles || []).slice(0, 6).map(article => ({
       title: article.title || "Local update",
       summary: [article.domain, article.seendate].filter(Boolean).join(", "),
       url: article.url || "",
     }));
   } catch {
-    return [];
+    return [{
+      title: "News unavailable",
+      summary: "The public news source did not respond in time.",
+    }];
   }
 }
