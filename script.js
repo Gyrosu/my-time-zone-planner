@@ -120,7 +120,7 @@ function init() {
   $("date").value = new Date().toISOString().slice(0, 10);
   setTimezoneValue("sourceTz", guessLocalTimezone(), "UTC");
   setTimezoneValue("targetTz", "America/New_York", "UTC");
-  $("safetyBackendUrl").value = localStorage.getItem("safetyBackendUrl") || "";
+  $("safetyBackendUrl").value = localStorage.getItem("safetyBackendUrl") || defaultSafetyBackendUrl();
   $("safetyBackendUrl").addEventListener("change", () => {
     localStorage.setItem("safetyBackendUrl", $("safetyBackendUrl").value.trim());
   });
@@ -176,6 +176,13 @@ function supportedTimezones() {
     return Array.from(new Set([...validCommon, ...Intl.supportedValuesOf("timeZone")])).sort();
   }
   return validCommon.sort();
+}
+
+function defaultSafetyBackendUrl() {
+  if (location.protocol.startsWith("http") && location.hostname.endsWith("vercel.app")) {
+    return `${location.origin}/api/check-on-them`;
+  }
+  return "";
 }
 
 function isValidTimeZone(timeZone) {
@@ -521,6 +528,7 @@ function renderContacts() {
       <div class="button-row">
         <button type="button" data-use-contact="${index}">Use</button>
         <button type="button" data-check-contact="${index}">Check on Them</button>
+        <button type="button" data-articles-contact="${index}">Find Articles</button>
         <button type="button" data-delete-contact="${index}">Delete</button>
       </div>
     </div>
@@ -530,6 +538,7 @@ function renderContacts() {
   $("contacts").querySelectorAll("[data-contact-zone]").forEach(button => button.addEventListener("click", () => button.classList.toggle("show-zone")));
   $("contacts").querySelectorAll("[data-use-contact]").forEach(button => button.addEventListener("click", () => useContact(Number(button.dataset.useContact))));
   $("contacts").querySelectorAll("[data-check-contact]").forEach(button => button.addEventListener("click", () => checkSafety(Number(button.dataset.checkContact))));
+  $("contacts").querySelectorAll("[data-articles-contact]").forEach(button => button.addEventListener("click", () => findSafetyArticles(Number(button.dataset.articlesContact))));
   $("contacts").querySelectorAll("[data-delete-contact]").forEach(button => button.addEventListener("click", () => deleteContact(Number(button.dataset.deleteContact))));
 }
 
@@ -609,6 +618,70 @@ function formatSafetyResponse(data) {
       if (item.url) lines.push(`  ${item.url}`);
     });
   });
+  return lines.join("\n");
+}
+
+async function findSafetyArticles(index) {
+  const contact = contacts[index];
+  const endpoint = safetyArticlesBackendUrl();
+  if (!endpoint) {
+    const query = encodeURIComponent(`${contact.area} attack shooting assault wildfire fire flood storm emergency police warning road closure food recall health alert when:7d`);
+    show(`Recent safety-related articles for ${contact.area}
+
+- Article search backend is not configured.
+- Search manually: https://news.google.com/search?q=${query}`);
+    return;
+  }
+
+  show(`Searching recent safety-related articles for ${contact.area}...`);
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contact, location: contact.area }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Article search failed.");
+    show(formatArticleResponse(data));
+  } catch (error) {
+    show(`Could not fetch recent articles.\n\n${error.message}\n\nTry the manual Google News link for this contact.`);
+  }
+}
+
+function safetyArticlesBackendUrl() {
+  const safetyUrl = $("safetyBackendUrl").value.trim() || defaultSafetyBackendUrl();
+  if (!safetyUrl) return "";
+  try {
+    const url = new URL(safetyUrl, location.href);
+    url.pathname = url.pathname.replace(/\/api\/check-on-them\/?$/, "/api/safety-articles");
+    if (!url.pathname.endsWith("/api/safety-articles")) url.pathname = "/api/safety-articles";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function formatArticleResponse(data) {
+  const lines = [
+    `Recent safety-related articles for ${data.location || "contact"}`,
+    data.generatedAt ? `Checked: ${new Date(data.generatedAt).toLocaleString("en-US")}` : "",
+    data.note || "",
+    "",
+  ].filter(Boolean);
+
+  const articles = data.articles || [];
+  if (!articles.length) {
+    lines.push("- No article links were returned for the past week.");
+    if (data.searchUrl) lines.push(`- Manual search: ${data.searchUrl}`);
+    return lines.join("\n");
+  }
+
+  articles.forEach((article, index) => {
+    lines.push(`${index + 1}. ${article.title}`);
+    if (article.source || article.published) lines.push(`   ${[article.source, article.published].filter(Boolean).join(" - ")}`);
+    if (article.url) lines.push(`   ${article.url}`);
+  });
+  if (data.searchUrl) lines.push("", `More results: ${data.searchUrl}`);
   return lines.join("\n");
 }
 
