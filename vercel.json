@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/check-on-them.js": {
+      "maxDuration": 15
+    }
+  }
+}

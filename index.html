@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Time Zone Planner</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <h1>Time Zone Planner</h1>
+
+    <section class="grid">
+      <div class="card">
+        <h2>Time zones</h2>
+        <label for="sourcePlace">Your place</label>
+        <input id="sourcePlace" list="placeHints" placeholder="Shanghai, Mountain View, California">
+        <button type="button" data-place-kind="source">Select My Place</button>
+        <button id="sourceSelected" class="place-chip" type="button" data-toggle-zone="source">
+          No place selected
+          <small>Time zone hidden</small>
+        </button>
+
+        <label for="sourceTz">Your time zone</label>
+        <select id="sourceTz"></select>
+
+        <label for="targetPlace">Their place</label>
+        <input id="targetPlace" list="placeHints" placeholder="Boise Idaho, China, London">
+        <button type="button" data-place-kind="target">Select Their Place</button>
+        <button id="targetSelected" class="place-chip" type="button" data-toggle-zone="target">
+          No place selected
+          <small>Time zone hidden</small>
+        </button>
+
+        <label for="targetTz">Their time zone</label>
+        <select id="targetTz"></select>
+      </div>
+
+      <div class="card">
+        <h2>Your free times</h2>
+        <label for="date">Date</label>
+        <input id="date" type="date">
+        <label for="times">Times or ranges, one per line</label>
+        <textarea id="times">9:00 AM
+1:30 PM
+6 PM to 8 PM</textarea>
+        <div class="button-row">
+          <button type="button" id="convertButton">Convert Times</button>
+          <button type="button" id="swapButton">Swap</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Contacts</h2>
+        <label for="contactName">Name</label>
+        <input id="contactName" placeholder="Ida">
+        <label for="contactArea">Area</label>
+        <input id="contactArea" placeholder="Boise Idaho">
+        <label for="contactNotes">Notes</label>
+        <textarea id="contactNotes" class="small-textarea" placeholder="Optional notes, like family, work schedule, or things to remember"></textarea>
+        <button id="contactSelected" class="place-chip" type="button" data-toggle-zone="contact">
+          No contact place selected
+          <small>Time zone hidden</small>
+        </button>
+        <input id="contactTz" type="hidden">
+        <div class="button-row">
+          <button type="button" data-place-kind="contact">Select Contact Place</button>
+          <button type="button" id="saveContactButton">Save Contact</button>
+        </div>
+        <label for="safetyBackendUrl">Check on Them backend URL (optional)</label>
+        <input id="safetyBackendUrl" placeholder="https://your-project.vercel.app/api/check-on-them">
+        <div id="contacts" class="contact-list"></div>
+      </div>
+
+      <div class="card">
+        <h2>Results</h2>
+        <div id="output" class="output">Ready.</div>
+      </div>
+    </section>
+  </main>
+
+  <div id="effects" class="effect-layer" aria-hidden="true"></div>
+  <div id="placeChooser" class="place-chooser" role="dialog" aria-modal="true" aria-labelledby="placeChooserTitle">
+    <div class="place-chooser-card">
+      <div class="place-chooser-top">
+        <h3 id="placeChooserTitle">Choose a place</h3>
+        <button type="button" id="closeChooser" title="Close">x</button>
+      </div>
+      <div id="placeChoices" class="place-options"></div>
+    </div>
+  </div>
+
+  <datalist id="placeHints">
+    <option value="Mountain View CA"></option>
+    <option value="Boise Idaho"></option>
+    <option value="California"></option>
+    <option value="China"></option>
+    <option value="London UK"></option>
+    <option value="Shanghai China"></option>
+  </datalist>
+
+  <script src="script.js"></script>
+</body>
+</html>
