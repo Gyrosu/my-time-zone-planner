@@ -8,7 +8,7 @@
 
 async function fetchJson(url, options = {}) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs || 9000);
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs || 4000);
   try {
     const response = await fetch(url, {
       headers: { "User-Agent": "TimeZonePlannerSafetyCheck/1.0" },
