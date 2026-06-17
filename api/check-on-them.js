@@ -8,6 +8,8 @@ const CORS_HEADERS = {
 const SAFETY_TERMS = "attack shooting assault wildfire storm flood emergency public safety warning";
 const TRAFFIC_TERMS = "major traffic accident road closure transit disruption crash";
 const FOOD_HEALTH_TERMS = "food safety recall health alert boil water advisory contamination";
+const GENERAL_TERMS = "local emergency alert warning";
+const REQUEST_TIMEOUT_MS = 900;
 const KNOWN_PLACES = {
   "redwood city california united states": {
     label: "Redwood City, California, United States",
@@ -25,7 +27,7 @@ const KNOWN_PLACES = {
   },
 };
 
-export default async function handler(request, response) {
+module.exports = async function handler(request, response) {
   if (request.method === "OPTIONS") {
     response.writeHead(204, CORS_HEADERS);
     response.end();
@@ -56,10 +58,10 @@ export default async function handler(request, response) {
     };
 
     if (place) {
-      categories.Weather.push(...await weatherItems(place));
-      if (place.country === "United States") {
-        categories.Weather.push(...await usWeatherAlerts(place));
-      }
+      const weatherChecks = [weatherItems(place)];
+      if (place.country === "United States") weatherChecks.push(usWeatherAlerts(place));
+      const weatherResults = await Promise.all(weatherChecks);
+      categories.Weather.push(...weatherResults.flat());
     } else {
       categories.Weather.push({
         title: "Weather unavailable",
@@ -67,10 +69,10 @@ export default async function handler(request, response) {
       });
     }
 
-    categories["Safety News"].push(...await gdeltItems(location, SAFETY_TERMS));
-    categories.Traffic.push(...await gdeltItems(location, TRAFFIC_TERMS));
-    categories["Food/Health Alerts"].push(...await gdeltItems(location, FOOD_HEALTH_TERMS));
-    categories["General Local Updates"].push(...await gdeltItems(location, "local emergency alert warning"));
+    categories["Safety News"].push(newsSearchItem(location, SAFETY_TERMS));
+    categories.Traffic.push(newsSearchItem(location, TRAFFIC_TERMS));
+    categories["Food/Health Alerts"].push(newsSearchItem(location, FOOD_HEALTH_TERMS));
+    categories["General Local Updates"].push(newsSearchItem(location, GENERAL_TERMS));
 
     sendJson(response, 200, {
       location: place?.label || location,
@@ -81,7 +83,7 @@ export default async function handler(request, response) {
   } catch (error) {
     sendJson(response, 500, { error: error.message || "Safety check failed." });
   }
-}
+};
 
 function sendJson(response, status, data) {
   response.writeHead(status, CORS_HEADERS);
@@ -97,8 +99,6 @@ function readJson(request) {
     });
     request.on("end", () => {
       try {
-        resolve(raw ? JSON.parse(raw) : {});
-        try {
         resolve(raw ? JSON.parse(raw) : {});
       } catch {
         reject(new Error("Invalid JSON."));
