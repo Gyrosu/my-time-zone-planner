@@ -1,3 +1,103 @@
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Content-Type": "application/json",
+};
+
+const SAFETY_TERMS = "attack shooting assault wildfire storm flood emergency public safety warning";
+const TRAFFIC_TERMS = "major traffic accident road closure transit disruption crash";
+const FOOD_HEALTH_TERMS = "food safety recall health alert boil water advisory contamination";
+const KNOWN_PLACES = {
+  "redwood city california united states": {
+    label: "Redwood City, California, United States",
+    latitude: 37.4852,
+    longitude: -122.2364,
+    country: "United States",
+    timezone: "America/Los_Angeles",
+  },
+  "boise idaho united states": {
+    label: "Boise, Idaho, United States",
+    latitude: 43.615,
+    longitude: -116.2023,
+    country: "United States",
+    timezone: "America/Denver",
+  },
+};
+
+export default async function handler(request, response) {
+  if (request.method === "OPTIONS") {
+    response.writeHead(204, CORS_HEADERS);
+    response.end();
+    return;
+  }
+
+  if (request.method !== "POST") {
+    sendJson(response, 405, { error: "Use POST." });
+    return;
+  }
+
+  try {
+    const body = await readJson(request);
+    const contact = body.contact || {};
+    const location = String(body.location || contact.area || contact.cityRegion || "").trim();
+    if (!location) {
+      sendJson(response, 400, { error: "A contact location is required." });
+      return;
+    }
+
+    const place = await geocode(location);
+    const categories = {
+      Weather: [],
+      "Safety News": [],
+      Traffic: [],
+      "Food/Health Alerts": [],
+      "General Local Updates": [],
+    };
+
+    if (place) {
+      categories.Weather.push(...await weatherItems(place));
+      if (place.country === "United States") {
+        categories.Weather.push(...await usWeatherAlerts(place));
+      }
+    } else {
+      categories.Weather.push({
+        title: "Weather unavailable",
+        summary: "Could not find coordinates for this location from the public geocoding source.",
+      });
+    }
+
+    categories["Safety News"].push(...await gdeltItems(location, SAFETY_TERMS));
+    categories.Traffic.push(...await gdeltItems(location, TRAFFIC_TERMS));
+    categories["Food/Health Alerts"].push(...await gdeltItems(location, FOOD_HEALTH_TERMS));
+    categories["General Local Updates"].push(...await gdeltItems(location, "local emergency alert warning"));
+
+    sendJson(response, 200, {
+      location: place?.label || location,
+      generatedAt: new Date().toISOString(),
+      note: "This is a public-source summary, not an emergency alert service. No AI-generated claims are added when sources are unavailable.",
+      categories,
+    });
+  } catch (error) {
+    sendJson(response, 500, { error: error.message || "Safety check failed." });
+  }
+}
+
+function sendJson(response, status, data) {
+  response.writeHead(status, CORS_HEADERS);
+  response.end(JSON.stringify(data));
+}
+
+function readJson(request) {
+  return new Promise((resolve, reject) => {
+    let raw = "";
+    request.on("data", chunk => {
+      raw += chunk;
+      if (raw.length > 20000) reject(new Error("Request body is too large."));
+    });
+    request.on("end", () => {
+      try {
+        resolve(raw ? JSON.parse(raw) : {});
       } catch {
         reject(new Error("Invalid JSON."));
       }
@@ -8,7 +108,7 @@
 
 async function fetchJson(url, options = {}) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs || 4000);
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs || 9000);
   try {
     const response = await fetch(url, {
       headers: { "User-Agent": "TimeZonePlannerSafetyCheck/1.0" },
@@ -137,3 +237,4 @@ async function gdeltItems(location, terms) {
     }];
   }
 }
+   
