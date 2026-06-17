@@ -2,6 +2,9 @@
   "functions": {
     "api/check-on-them.js": {
       "maxDuration": 5
+    },
+    "api/safety-articles.js": {
+      "maxDuration": 10
     }
   }
 }
