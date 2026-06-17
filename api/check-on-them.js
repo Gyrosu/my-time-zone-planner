@@ -98,6 +98,8 @@ function readJson(request) {
     request.on("end", () => {
       try {
         resolve(raw ? JSON.parse(raw) : {});
+        try {
+        resolve(raw ? JSON.parse(raw) : {});
       } catch {
         reject(new Error("Invalid JSON."));
       }
@@ -108,7 +110,7 @@ function readJson(request) {
 
 async function fetchJson(url, options = {}) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs || 9000);
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs || REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(url, {
       headers: { "User-Agent": "TimeZonePlannerSafetyCheck/1.0" },
@@ -125,7 +127,7 @@ async function geocode(location) {
   const known = KNOWN_PLACES[cleanLocationKey(location)];
   if (known) return known;
 
-  for (const query of geocodeVariants(location)) {
+  for (const query of geocodeVariants(location).slice(0, 2)) {
     const params = new URLSearchParams({ name: query, count: "5", language: "en", format: "json" });
     try {
       const data = await fetchJson(`https://geocoding-api.open-meteo.com/v1/search?${params}`);
@@ -213,28 +215,10 @@ async function usWeatherAlerts(place) {
   }
 }
 
-async function gdeltItems(location, terms) {
-  const params = new URLSearchParams({
-    query: `"${location}" (${terms})`,
-    mode: "ArtList",
-    format: "json",
-    timespan: "3d",
-    maxrecords: "5",
-    sort: "datedesc",
-  });
-  try {
-    const data = await fetchJson(`https://api.gdeltproject.org/api/v2/doc/doc?${params}`);
-    return (data.articles || []).slice(0, 5).map(article => ({
-      title: article.title || "Local update",
-      summary: [article.domain, article.seendate].filter(Boolean).join(", "),
-      url: article.url || "",
-    }));
-  } catch {
-    return [{
-      title: "News unavailable",
-      summary: "The public news source did not respond in time. Use the link below for a manual check.",
-      url: `https://news.google.com/search?q=${encodeURIComponent(`${location} ${terms}`)}`,
-    }];
-  }
+function newsSearchItem(location, terms) {
+  return {
+    title: "Manual public news search",
+    summary: "This fast safety check does not fetch news feeds. Open this search to review current public reports.",
+    url: `https://news.google.com/search?q=${encodeURIComponent(`${location} ${terms} when:3d`)}`,
+  };
 }
-   
