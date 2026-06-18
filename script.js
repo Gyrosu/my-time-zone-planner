@@ -362,23 +362,26 @@ function parseDateInput(value) {
 
 function parseTimeEntry(value) {
   const cleaned = value.toLowerCase().replace(/[–—]/g, "-").replace(/\s+/g, " ").trim();
+  const conversationalTime = parseConversationalTime(cleaned);
+  if (conversationalTime) {
+    return timeAlternatives(conversationalTime).map(time => ({ kind: "time", time }));
+  }
+
   const rangeParts = cleaned.split(/\s+(?:to|until|through)\s+|\s*-\s*/).filter(Boolean);
   if (rangeParts.length >= 2) {
+    const startSuffix = suffixOf(rangeParts[0]);
     const endSuffix = suffixOf(rangeParts[1]);
-    return [{ kind: "range", start: parseSingleTime(rangeParts[0], endSuffix), end: parseSingleTime(rangeParts[1]) }];
+    const start = parseSingleTime(rangeParts[0], endSuffix);
+    const end = parseSingleTime(rangeParts[1], startSuffix);
+    return pairRangeAlternatives(timeAlternatives(start), timeAlternatives(end));
   }
-  const first = parseSingleTime(cleaned);
-  if (!first.suffix && first.hour >= 1 && first.hour <= 12) {
-    return [
-      { kind: "time", time: { ...first, suffix: "AM", hour24: first.hour % 12 } },
-      { kind: "time", time: { ...first, suffix: "PM", hour24: first.hour === 12 ? 12 : first.hour + 12 } },
-    ];
-  }
-  return [{ kind: "time", time: first }];
+  return timeAlternatives(parseSingleTime(cleaned)).map(time => ({ kind: "time", time }));
 }
 
 function suffixOf(value) {
-  const match = value.match(/\b(am|pm|a\.m\.|p\.m\.)\b/i);
+  const match = value.match(/\b(am|pm|a\.m\.|p\.m\.|morning|afternoon|evening|night)\b/i);
+  if (match && /afternoon|evening|night/i.test(match[1])) return "pm";
+  if (match && /morning/i.test(match[1])) return "am";
   return match ? match[1].replace(/\./g, "").toLowerCase() : "";
 }
 
@@ -386,11 +389,35 @@ function parseSingleTime(raw, impliedSuffix = "") {
   let value = raw.replace(/\./g, "").replace("noon", "12 pm").replace("midnight", "12 am").trim();
   value = value.replace(/\b(in the morning|morning)\b/g, " am");
   value = value.replace(/\b(in the afternoon|afternoon|evening|night)\b/g, " pm");
-  const match = value.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i);
-  if (!match) throw new Error(`Could not understand time: ${raw}`);
-  const hour = Number(match[1]);
-  const minute = Number(match[2] || 0);
-  const suffix = (match[3] || impliedSuffix || "").toLowerCase();
+  value = value.replace(/\bo['’]?clock\b/g, "").replace(/\s+/g, " ").trim();
+
+  const conversational = parseConversationalTime(value, impliedSuffix);
+  if (conversational) return conversational;
+
+  const numericMatch = value.match(/^\s*(\d{1,2})(?::(\d{1,2}))?\s*(am|pm)?\s*$/i);
+  let hour;
+  let minute;
+  let explicitSuffix;
+  if (numericMatch) {
+    hour = Number(numericMatch[1]);
+    minute = Number(numericMatch[2] || 0);
+    explicitSuffix = numericMatch[3] || "";
+  } else {
+    const wordMatch = value.match(/^(.*?)\s*(am|pm)?$/i);
+    const words = wordMatch?.[1]?.trim() || "";
+    const wordParts = words.split(/\s+/).filter(Boolean);
+    if (wordParts.length === 1) {
+      hour = parseNumberWords(wordParts[0]);
+      minute = 0;
+    } else if (wordParts.length >= 2) {
+      hour = parseNumberWords(wordParts[0]);
+      minute = parseNumberWords(wordParts.slice(1).join(" "));
+    }
+    explicitSuffix = wordMatch?.[2] || "";
+  }
+
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) throw new Error(`Could not understand time: ${raw}`);
+  const suffix = (explicitSuffix || impliedSuffix || "").toLowerCase();
   if (minute > 59) throw new Error(`Minutes must be 00 through 59: ${raw}`);
   let hour24 = hour;
   if (suffix) {
@@ -401,6 +428,89 @@ function parseSingleTime(raw, impliedSuffix = "") {
     throw new Error(`24-hour times must use 0 through 23: ${raw}`);
   }
   return { hour, minute, suffix: suffix.toUpperCase(), hour24 };
+}
+
+function parseConversationalTime(raw, impliedSuffix = "") {
+  let value = raw.toLowerCase().replace(/\./g, "").replace(/-/g, " ").replace(/\s+/g, " ").trim();
+  let suffix = suffixOf(value) || impliedSuffix;
+  value = value
+    .replace(/\b(am|pm|morning|afternoon|evening|night)\b/g, "")
+    .replace(/\bin the\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  let match = value.match(/^(?:a\s+)?quarter\s+(past|after|to|before)\s+(.+)$/);
+  if (match) return relativeTime(15, match[1], match[2], suffix, raw);
+
+  match = value.match(/^half\s+(?:past|after)\s+(.+)$/);
+  if (match) return relativeTime(30, "past", match[1], suffix, raw);
+
+  match = value.match(/^(.+?)\s+(past|after|to|before)\s+(.+)$/);
+  if (match) {
+    const minute = parseNumberWords(match[1]);
+    if (Number.isInteger(minute) && minute > 0 && minute < 60) {
+      return relativeTime(minute, match[2], match[3], suffix, raw);
+    }
+  }
+  return null;
+}
+
+function relativeTime(minuteAmount, direction, hourText, suffix, raw) {
+  const hour = parseNumberWords(hourText.trim());
+  if (!Number.isInteger(hour) || hour < 1 || hour > 12) return null;
+  const isBefore = direction === "to" || direction === "before";
+  const displayHour = isBefore ? (hour === 1 ? 12 : hour - 1) : hour;
+  const minute = isBefore ? 60 - minuteAmount : minuteAmount;
+  return buildTime(displayHour, minute, suffix, raw);
+}
+
+function buildTime(hour, minute, suffix, raw) {
+  const normalizedSuffix = String(suffix || "").toLowerCase();
+  let hour24 = hour;
+  if (normalizedSuffix) {
+    if (hour < 1 || hour > 12) throw new Error(`12-hour times must use 1 through 12: ${raw}`);
+    hour24 = normalizedSuffix === "pm" && hour !== 12 ? hour + 12 : hour;
+    if (normalizedSuffix === "am" && hour === 12) hour24 = 0;
+  }
+  return { hour, minute, suffix: normalizedSuffix.toUpperCase(), hour24 };
+}
+
+function timeAlternatives(time) {
+  if (time.suffix || time.hour < 1 || time.hour > 12) return [time];
+  return [
+    { ...time, suffix: "AM", hour24: time.hour % 12 },
+    { ...time, suffix: "PM", hour24: time.hour === 12 ? 12 : time.hour + 12 },
+  ];
+}
+
+function pairRangeAlternatives(starts, ends) {
+  if (starts.length === 2 && ends.length === 2) {
+    return [
+      { kind: "range", start: starts[0], end: ends[0] },
+      { kind: "range", start: starts[1], end: ends[1] },
+    ];
+  }
+  const ranges = [];
+  starts.forEach(start => ends.forEach(end => ranges.push({ kind: "range", start, end })));
+  return ranges;
+}
+
+function parseNumberWords(value) {
+  const normalized = String(value || "").toLowerCase().replace(/-/g, " ").replace(/\band\b/g, " ").replace(/\s+/g, " ").trim();
+  if (/^\d+$/.test(normalized)) return Number(normalized);
+  const small = {
+    zero: 0, oh: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
+    eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14,
+    fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+  };
+  const tens = { twenty: 20, thirty: 30, forty: 40, fifty: 50 };
+  const tokens = normalized.split(" ").filter(Boolean);
+  if (tokens.length === 1 && Object.hasOwn(small, tokens[0])) return small[tokens[0]];
+  if (tokens.length === 1 && Object.hasOwn(tens, tokens[0])) return tens[tokens[0]];
+  if (tokens.length === 2 && Object.hasOwn(tens, tokens[0]) && Object.hasOwn(small, tokens[1])) {
+    return tens[tokens[0]] + small[tokens[1]];
+  }
+  return NaN;
 }
 
 function wallTimeToInstant(date, time, timeZone) {
